@@ -1,8 +1,16 @@
 from random import randint
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO
 
 app = Flask(__name__)
+app.jinja_options.update(
+    # resolve the conflict between the template syntax of jinja2 and vuejs
+    dict(
+        variable_start_string='[[',
+        variable_end_string=']]',
+    )
+)
+
 socket = SocketIO(app)
 
 name_space = '/echo'
@@ -11,8 +19,14 @@ channels = ['ECG', 'EEG']
 
 
 @app.route('/')
+@app.route('/oscilloscope')
 def index():
     return render_template('index.html', params={'channels': channels})
+
+
+@app.route('/oscilloscope/channels', methods=['get', 'post'])
+def channel():
+    return jsonify({'channels': channels})
 
 
 @app.route('/push')

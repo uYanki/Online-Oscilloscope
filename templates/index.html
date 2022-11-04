@@ -1,167 +1,204 @@
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <script src="{{ url_for('static',filename='js/vue.js') }}"></script>
-    <script src="{{ url_for('static',filename='js/jquery.min.js') }}"></script>
-    <script src="{{ url_for('static',filename='js/axios.min.js') }}"></script>
-    <script src="{{ url_for('static',filename='js/echarts.min.js') }}"></script>
-    <script src="{{ url_for('static',filename='js/socket.io.min.js') }}"></script>
-    <link
-      href="{{ url_for('static',filename='css/bootstrap.min.css') }}"
-      rel="stylesheet"
-    />
-    <title>Oscilloscope</title>
-  </head>
 
-  <body>
-    <div id="app" class="center-block" style="max-width: 95%">
-      <h1>
-        Online Oscilloscope
-        <small><span class="label label-default">v1.0</span></small>
-      </h1>
-      <hr />
+<head>
+  <meta charset="utf-8" />
+  <script src="[[ url_for('static',filename='js/vue.js') ]]"></script>
+  <script src="[[ url_for('static',filename='js/jquery.min.js') ]]"></script>
+  <script src="[[ url_for('static',filename='js/axios.min.js') ]]"></script>
+  <script src="[[ url_for('static',filename='js/echarts.min.js') ]]"></script>
+  <script src="[[ url_for('static',filename='js/socket.io.min.js') ]]"></script>
+  <link href="[[ url_for('static',filename='css/bootstrap.min.css') ]]" rel="stylesheet" />
+  <title>Oscilloscope</title>
+</head>
 
-      <div>
-        <!-- channel selector -->
-        <div id="selector" class="leftpart">
-          <!-- filter -->
-          <div id="filter">
-            <input
-              type="text"
-              class="form-control"
-              v-model="keyword"
-              v-on:keyup.enter="filterChannel"
-              placeholder="filter"
-            />
-          </div>
+<body>
+  <div id="app" class="center-block" style="max-width: 95%">
+    <h1>
+      Online Oscilloscope
+      <small><span class="label label-default">v1.0</span></small>
+    </h1>
+    <hr />
 
-          <!-- list -->
-          <ul class="list-group">
-            {% for channel in params.channels %}
-            <li class="list-group-item">
-              <!-- channel name -->
-              <label class="checkbox-inline">
-                <input type="checkbox" /> {{channel}}
-              </label>
-              <!-- lastest value -->
-              <small id="lastestv" class="pull-right">
-                {% raw %} {{ lastest_value }} {% endraw %}
-              </small>
-            </li>
-            {% endfor %}
-          </ul>
+    <div>
+      <!-- channel selector -->
+      <div id="selector" class="leftpart">
+        <!-- filter -->
+        <div id="filter">
+          <input type="text" class="form-control" placeholder="filter" v-model="keyword" v-on:keyup="filterChannel()" />
         </div>
-        <!-- data plotter -->
-        <div id="dataplot" class="rightpart"></div>
+        <!-- list -->
+        <ul class="list-group">
+          <li class="list-group-item" v-for="channel in channels_dst">
+            <!-- channel name -->
+            <label class="checkbox-inline"> <input type="checkbox" /> {{channel}} </label>
+            <!-- lastest value -->
+            <small id="lastestv" class="pull-right"> {{channels[channel]["values"].slice(-1)[0]}} </small>
+          </li>
+        </ul>
       </div>
-      <button id="btn" type="button" class="btn btn-success btn-circle">
-        <span
-          class="glyphicon glyphicon-triangle-right"
-          aria-hidden="true"
-        ></span>
-      </button>
+      <!-- data plotter -->
+      <div id="dataplot" class="rightpart"></div>
     </div>
 
-    <style type="text/css">
-      .leftpart {
-        float: left;
-        width: 20%;
-      }
-      #filter {
-        margin-bottom: 20px;
-      }
-      .rightpart {
-        float: right;
-        width: 78%;
-        height: 80%;
-      }
-      .btn-circle {
-        left: 8vh;
-        bottom: 8vh;
-        position: fixed;
-        width: 50px;
-        height: 50px;
-        text-align: center;
-        padding: 6px 0;
-        font-size: 20px;
-        line-height: 2;
-        border-radius: 25px;
-      }
-    </style>
+    <!-- run or stop -->
+    <button v-if="runstate" type="button" class="btn btn-danger btn-float" v-on:click="disconnectSocket()">
+      <span class="glyphicon glyphicon-pause" aria-hidden="true"></span>
+    </button>
+    <button v-else type="button" class="btn btn-success btn-float" v-on:click="connectSocket()">
+      <span class="glyphicon glyphicon-play" aria-hidden="true"></span>
+    </button>
+  </div>
 
-    <script type="text/javascript">
-      let app = new Vue({
-        el: "#app",
-        data: {
-          keyword: "11",
-          axisy_values: [1, 2, 4, 4, 4],
-          lastest_value: 0,
-          show_count: 1050, // 总显示点数目
-        },
-        mounted: function () {
-          let that = this;
-          // 'mounted' called after 'created'
-          that.initChart();
-          that.initSocket();
-          // dynamically resize chart
-          window.onresize = function windowResize() {
-            that.chart.resize();
-            that.chart.setOption(that.option, true);
-          };
-        },
-        methods: {
-          initChart: function () {
-            let that = this;
-            that.chart = echarts.init(document.getElementById("dataplot"));
-            that.option = {
-              animation: false,
-              xAxis: {
-                show: false,
-                data: [],
-              },
-              yAxis: {
-                type: "value",
-              },
-              series: [
-                {
-                  data: that.axisy_values,
-                  type: "line",
-                },
-              ],
-            };
-            that.chart.setOption(that.option);
-          },
-          initSocket: function () {
-            let that = this;
-            // connect to socket ( addr = ws://ip:port/namespace )
-            that.socket = io.connect("ws://127.0.0.1:5000/echo", {
-              timeout: 300000,
-              reconnectionDelayMax: 1000,
-              reconnectionDelay: 500,
-            });
-            // listen events
-            that.socket.on("connect", () => {
-              console.log("-> connect data channel");
-            });
-            that.socket.on("disconnect", () => {
-              console.log("-> disconnect data channel");
-            });
-            that.socket.on("append", (res) => {
-              let data = res["data"];
-              that.axisy_values.push(...res["data"]); // 追加值
-              that.lastest_value = data[data.length - 1]; // 最新值
-              if (that.axisy_values.length > that.show_count) {
-                that.axisy_values.splice(
-                  0,
-                  that.axisy_values.length - that.show_count
-                ); // 长度限制
+  <style type="text/css">
+    .leftpart {
+      float: left;
+      width: 20%;
+    }
+
+    #filter {
+      margin-bottom: 20px;
+    }
+
+    .rightpart {
+      float: right;
+      width: 78%;
+      height: 80%;
+    }
+
+    .btn-float {
+      position: fixed;
+      left: 8vh;
+      bottom: 8vh;
+      width: 8vh;
+      height: 8vh;
+      text-align: center;
+      padding: 6px 0;
+      font-size: 20px;
+      border-radius: 4vh;
+    }
+
+    #lastestv {
+      color: blueviolet;
+    }
+  </style>
+
+  <script type="text/javascript">
+    let app = new Vue({
+
+      el: "#app",
+
+      data: {
+
+        // for channel selector        
+        keyword: "",
+        channels_dst: {}, // after filter
+        channels: [],
+
+        // for data plotter
+        axisy_values: [1, 2, 4, 4, 4, 1, 2, 4, 4, 4],
+        show_count: 1050, // 总显示点数目
+        runstate: false,
+      },
+
+      created: function () {
+        let that = this;
+        // get channel name
+        axios.get('/oscilloscope/channels')
+          .then(function (response) {
+            response.data["channels"].forEach(
+              (value, index, array) => {
+                that.$set(that.channels, value, { 'visible': true, 'values': [] });
               }
-              that.chart.setOption(that.option); // refresh chart
-            });
-          },
-          filterChannel: function () {},
+            );
+            that.filterChannel();
+          })
+          .catch(function (error) {
+            console.log(error);
+          });
+      },
+
+      // function 'mounted' called after function 'created'
+      mounted: function () {
+        let that = this;
+        // init chart
+        that.initChart();
+        // dynamically resize chart
+        window.onresize = function windowResize() {
+          that.chart.resize();
+          that.chart.setOption(that.option, true);
+        };
+      },
+
+      methods: {
+
+        initChart: function () {
+          // config chart
+          let that = this;
+          that.chart = echarts.init(document.getElementById("dataplot"));
+          that.option = {
+            animation: false,
+            xAxis: {
+              show: false,
+              data: [],
+            },
+            yAxis: {
+              type: "value",
+            },
+            series: [
+              {
+                data: that.axisy_values,
+                type: "line",
+              },
+            ],
+          };
+          that.chart.setOption(that.option);
         },
-      });
-    </script>
-  </body>
+
+        connectSocket: function () {
+          let that = this;
+          // connect to socket ( addr = ws://ip:port/namespace )
+          that.socket = io.connect("ws://127.0.0.1:5000/echo", {
+            timeout: 300000,
+            reconnectionDelayMax: 1000,
+            reconnectionDelay: 1000,
+          });
+          // listen events
+          that.socket.on("connect", () => {
+            console.log("-> connect data channel");
+            that.runstate = true;
+          });
+          that.socket.on("disconnect", () => {
+            console.log("-> disconnect data channel");
+            that.runstate = false;
+          })
+          // receive data
+          that.socket.on("append", (res) => {
+            let data = res["data"];
+            that.axisy_values.push(...res["data"]); // append values
+            if (that.axisy_values.length > that.show_count) {
+              that.axisy_values.splice(0, that.axisy_values.length - that.show_count); // limit size
+            }
+            that.chart.setOption(that.option); // refresh chart
+          });
+        },
+        disconnectSocket: function () {
+          let that = this;
+          // disconnect to socket
+          that.socket.disconnect();
+        },
+
+        filterChannel: function () {
+          let that = this;
+          that.channels_dst = Object.keys(that.channels).filter(item => {
+            // case-insensitive
+            return item.toLowerCase().indexOf(that.keyword.toLowerCase()) !== -1;
+          });
+        },
+
+      },
+
+    });
+  </script>
+</body>
+
 </html>

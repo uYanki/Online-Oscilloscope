@@ -1,4 +1,7 @@
-网页版示波器
+在线示波器
 
 bootstarp: https://v3.bootcss.com/
+
 echarts: https://echarts.apache.org/zh/index.html
+
+flask: https://www.w3cschool.cn/flask_1/
