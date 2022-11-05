@@ -12,62 +12,90 @@
 </head>
 
 <body>
-  <div id="app" class="center-block" style="max-width: 95%">
+  <div id="app" class="center-block" style="max-width: 95vw;">
     <h1>
       Online Oscilloscope
       <small><span class="label label-default">v1.0</span></small>
     </h1>
     <hr />
 
-    <div>
+    <div id="container">
       <!-- channel selector -->
       <div id="selector" class="leftpart">
         <!-- filter -->
         <div id="filter">
-          <input type="text" class="form-control" placeholder="filter" v-model="keyword" v-on:keyup="filterChannel()" />
+          <input type="text" class="form-control" placeholder="filter" v-model="keyword" />
         </div>
         <!-- list -->
-        <ul class="list-group">
-          <li class="list-group-item" v-for="channel in channels_dst">
-            <!-- channel name -->
-            <label class="checkbox-inline"> <input type="checkbox" /> {{channel}} </label>
-            <!-- lastest value -->
-            <small id="lastestv" class="pull-right"> {{channels[channel]["values"].slice(-1)[0]}} </small>
-          </li>
-        </ul>
+        <div id="chanlist">
+          <ul class="list-group">
+            <li class="list-group-item" v-for="channel in filterChannels">
+              <!-- channel name -->
+              <label class="checkbox-inline"> <input type="checkbox" v-model="channels[channel]['visible']" @change="updateOption()" /> {{channel}} </label>
+              <!-- lastest value -->
+              <small id="lastestv" class="pull-right"> {{channels[channel]["lastv"]}} </small>
+            </li>
+          </ul>
+        </div>
       </div>
       <!-- data plotter -->
-      <div id="dataplot" class="rightpart"></div>
+      <div class="rightpart">
+        <div id="dataplot"></div>
+        <hr>
+      </div>
     </div>
 
     <!-- run or stop -->
-    <button v-if="runstate" type="button" class="btn btn-danger btn-float" v-on:click="disconnectSocket()">
+    <button v-if="runstate" type="button" class="btn btn-danger btn-float" v-on:click="disconnect()">
       <span class="glyphicon glyphicon-pause" aria-hidden="true"></span>
     </button>
-    <button v-else type="button" class="btn btn-success btn-float" v-on:click="connectSocket()">
+    <button v-else type="button" class="btn btn-success btn-float" v-on:click="connect()">
       <span class="glyphicon glyphicon-play" aria-hidden="true"></span>
     </button>
   </div>
 
   <style type="text/css">
+    * {
+      box-sizing: border-box;
+    }
+
+    #container {
+      height: 80%;
+    }
+
     .leftpart {
       float: left;
       width: 20%;
+      height: 100%;
+
+      display: flex;
+      flex-direction: column;
     }
 
     #filter {
       margin-bottom: 20px;
     }
 
+    #chanlist {
+      /* 启用滚动 */
+      overflow: auto;
+      /* 占满剩余高度 */
+      flex: 1;
+    }
+
+    /* 隐藏滚动条 */
+    #chanlist::-webkit-scrollbar {
+      width: 0 !important
+    }
+
     .rightpart {
       float: right;
       width: 78%;
-      height: 80%;
     }
 
     .btn-float {
       position: fixed;
-      left: 8vh;
+      right: 8vh;
       bottom: 8vh;
       width: 8vh;
       height: 8vh;
@@ -80,6 +108,11 @@
     #lastestv {
       color: blueviolet;
     }
+
+    #dataplot {
+      width: 100%;
+      height: 100%;
+    }
   </style>
 
   <script type="text/javascript">
@@ -89,15 +122,14 @@
 
       data: {
 
-        // for channel selector        
-        keyword: "",
-        channels_dst: {}, // after filter
+        socketaddr: "ws://127.0.0.1:5000/echo",
+        runstate: false,
+
+        keyword: "", // for channel selector  
+        maxdisplay: 500, // count of displayed values
+
         channels: [],
 
-        // for data plotter
-        axisy_values: [1, 2, 4, 4, 4, 1, 2, 4, 4, 4],
-        show_count: 1050, // 总显示点数目
-        runstate: false,
       },
 
       created: function () {
@@ -107,17 +139,24 @@
           .then(function (response) {
             response.data["channels"].forEach(
               (value, index, array) => {
-                that.$set(that.channels, value, { 'visible': true, 'values': [] });
+                // insert key-value, usage -> this.$set(dict,key,value)
+                that.$set(that.channels,
+                  value, // channel name
+                  {
+                    'visible': false, // [bool] whether display
+                    'values': [], // [num list] channel values
+                    'lastv': 0 // [num] lastest value
+                  });
               }
             );
-            that.filterChannel();
+            that.updateOption();
           })
           .catch(function (error) {
             console.log(error);
           });
       },
 
-      // function 'mounted' called after function 'created'
+      // usage -> function 'mounted' called after function 'created'
       mounted: function () {
         let that = this;
         // init chart
@@ -127,37 +166,92 @@
           that.chart.resize();
           that.chart.setOption(that.option, true);
         };
+        // auto connect socket
+        that.connect();
+      },
+
+      computed: {
+        filterChannels() {
+          let that = this;
+          return Object.keys(that.channels).filter(item => {
+            // case-insensitive
+            return item.toLowerCase().indexOf(that.keyword.toLowerCase()) !== -1;
+          });
+        }
       },
 
       methods: {
-
+        // Chart
         initChart: function () {
-          // config chart
           let that = this;
-          that.chart = echarts.init(document.getElementById("dataplot"));
+          // config chart
           that.option = {
             animation: false,
             xAxis: {
               show: false,
+              // type: "", // 'time' or 'category'
               data: [],
+              splitLine: {
+                show: false
+              }
             },
             yAxis: {
               type: "value",
+              splitLine: {
+                show: true,
+              }
             },
-            series: [
-              {
-                data: that.axisy_values,
-                type: "line",
-              },
-            ],
+            legend: {},
+            tooltip: {
+              trigger: "item", // 'item' or 'axis'
+
+            },
+            // enable wheel Zoom
+            // dataZoom: [{
+            //   type: "inside"
+            // }],
+            series: [],
           };
+          that.chart = echarts.init(document.getElementById("dataplot"));
           that.chart.setOption(that.option);
         },
+        updateOption: function () {
+          let that = this;
+          // clear previous option
+          that.option.series = [];
+          // display visible channel
+          for (let key in that.channels) {
+            // key -> channel name
+            let channel = that.channels[key];
+            if (channel["visible"] === true) {
+              that.option.series.push({
+                name: key,
+                type: "line",
+                data: channel["values"].slice(-that.maxdisplay),
+                showSymbol: false,
+              });
+            }
+          }
+          // refresh chart
+          that.chart.setOption(that.option, true); // no merge = true
+        },
+        appendValues: function (newvalues) {
+          let that = this;
+          // append values
+          for (let key in newvalues) {
+            let channel = that.channels[key];
+            channel["values"].push(...newvalues[key]);
+            channel["lastv"] = channel["values"].slice(-1)[0]; // lastest value
+          }
+          // refresh chart
+          that.updateOption();
+        },
 
-        connectSocket: function () {
+        // Socket IO
+        connect: function () {
           let that = this;
           // connect to socket ( addr = ws://ip:port/namespace )
-          that.socket = io.connect("ws://127.0.0.1:5000/echo", {
+          that.socket = io.connect(that.socketaddr, {
             timeout: 300000,
             reconnectionDelayMax: 1000,
             reconnectionDelay: 1000,
@@ -173,26 +267,13 @@
           })
           // receive data
           that.socket.on("append", (res) => {
-            let data = res["data"];
-            that.axisy_values.push(...res["data"]); // append values
-            if (that.axisy_values.length > that.show_count) {
-              that.axisy_values.splice(0, that.axisy_values.length - that.show_count); // limit size
-            }
-            that.chart.setOption(that.option); // refresh chart
+            that.appendValues(res["data"]);
           });
         },
-        disconnectSocket: function () {
+        disconnect: function () {
           let that = this;
           // disconnect to socket
           that.socket.disconnect();
-        },
-
-        filterChannel: function () {
-          let that = this;
-          that.channels_dst = Object.keys(that.channels).filter(item => {
-            // case-insensitive
-            return item.toLowerCase().indexOf(that.keyword.toLowerCase()) !== -1;
-          });
         },
 
       },

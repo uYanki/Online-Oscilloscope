@@ -15,7 +15,7 @@ socket = SocketIO(app)
 
 name_space = '/echo'
 
-channels = ['ECG', 'EEG']
+channels = set(['ECG', 'EEG', 'unkonwn', 'adc0', 'adc1', 'adc2', 'stm632', 'es6p32',  'stm32', 'esp32', 'unko2nwn', 'adc02', 'adc21', 'adc22', 'stm322', 'esp232'])
 
 
 @app.route('/')
@@ -26,13 +26,16 @@ def index():
 
 @app.route('/oscilloscope/channels', methods=['get', 'post'])
 def channel():
-    return jsonify({'channels': channels})
+    return jsonify({'channels': list(channels)})
 
 
 @app.route('/push')
 def broadcast_msg():  # 广播数据
     event_name = 'append'
-    broadcasted_data = {'data': [randint(-i*i, i*i) for i in range(200)]}
+    broadcasted_data = {'data': {
+        'ECG': [randint(-i*i, i*i) for i in range(100)],
+        'EEG': [randint(i*2, i*3) for i in range(50)]
+    }}
     socket.emit(event_name, broadcasted_data, broadcast=True, namespace=name_space)
     return 'done!'
 
