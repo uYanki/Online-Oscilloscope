@@ -1,6 +1,7 @@
 <html lang="en">
 
 <head>
+  <title>Online Oscilloscope</title>
   <meta charset="utf-8" />
   <script src="[[ url_for('static',filename='js/vue.js') ]]"></script>
   <script src="[[ url_for('static',filename='js/jquery.min.js') ]]"></script>
@@ -8,7 +9,7 @@
   <script src="[[ url_for('static',filename='js/echarts.min.js') ]]"></script>
   <script src="[[ url_for('static',filename='js/socket.io.min.js') ]]"></script>
   <link href="[[ url_for('static',filename='css/bootstrap.min.css') ]]" rel="stylesheet" />
-  <title>Oscilloscope</title>
+  <link href="[[ url_for('static',filename='css/spinner.css') ]]" rel="stylesheet" />
 </head>
 
 <body>
@@ -20,6 +21,7 @@
     <hr />
 
     <div id="container">
+
       <!-- channel selector -->
       <div id="selector" class="leftpart">
         <!-- filter -->
@@ -27,29 +29,39 @@
           <input type="text" class="form-control" placeholder="filter" v-model="keyword" />
         </div>
         <!-- list -->
-        <div id="chanlist">
-          <ul class="list-group">
-            <li class="list-group-item" v-for="channel in filterChannels">
-              <!-- channel name -->
-              <label class="checkbox-inline"> <input type="checkbox" v-model="channels[channel]['visible']" @change="updateOption()" /> {{channel}} </label>
-              <!-- lastest value -->
-              <small id="lastestv" class="pull-right"> {{channels[channel]["lastv"]}} </small>
-            </li>
-          </ul>
-        </div>
+        <ul class="chanlist list-group">
+          <!-- use ':key' to bind 'li' -->
+          <li class="chanitem list-group-item " v-for="(chanName,index) in filterChannels" :key="chanName" @mouseenter="onMouseEnterItem($event)" @mouseleave="onMouseLeaveItem($event)">
+            <!-- channel name -->
+            <label class="channame checkbox-inline">
+              <input type="checkbox" v-model="channels[chanName]['visible']" @change="updateOption()" /> {{chanName}}
+            </label>
+            <!-- record values -->
+            <span @click="recordWave(chanName,$event)">
+              &nbsp;
+              <button v-if="channels[chanName]['startpos']<0" class="btn btn-hover-display btn-xs">
+                <span class="glyphicon glyphicon-play"></span>
+                Record
+              </button>
+              <button v-else class="spinner bt-spinner"></button>
+              &nbsp;
+              <small class="chanval"> {{channels[chanName]["lastv"]}} </small>
+            </span>
+            <!-- lastest value -->
+          </li>
+        </ul>
       </div>
       <!-- data plotter -->
       <div class="rightpart">
         <div id="dataplot"></div>
-        <hr>
       </div>
     </div>
 
     <!-- run or stop -->
-    <button v-if="runstate" type="button" class="btn btn-danger btn-float" v-on:click="disconnect()">
+    <button v-if="runstate" class="btn btn-danger btn-float" v-on:click="disconnect()">
       <span class="glyphicon glyphicon-pause" aria-hidden="true"></span>
     </button>
-    <button v-else type="button" class="btn btn-success btn-float" v-on:click="connect()">
+    <button v-else class="btn btn-success btn-float" v-on:click="connect()">
       <span class="glyphicon glyphicon-play" aria-hidden="true"></span>
     </button>
   </div>
@@ -61,10 +73,13 @@
 
     #container {
       height: 80%;
+      display: flex;
+      flex-direction: row;
     }
 
     .leftpart {
       float: left;
+
       width: 20%;
       height: 100%;
 
@@ -72,11 +87,27 @@
       flex-direction: column;
     }
 
+
+    .rightpart {
+      float: right;
+      flex: 1;
+    }
+
     #filter {
       margin-bottom: 20px;
     }
 
-    #chanlist {
+    /* 去掉按钮点击时的边框 */
+    .btn:focus,
+    .btn:active:focus,
+    .btn.active:focus,
+    .btn.focus,
+    .btn:active.focus,
+    .btn.active.focus {
+      outline: none;
+    }
+
+    .chanlist {
       /* 启用滚动 */
       overflow: auto;
       /* 占满剩余高度 */
@@ -84,13 +115,44 @@
     }
 
     /* 隐藏滚动条 */
-    #chanlist::-webkit-scrollbar {
+    .chanlist::-webkit-scrollbar {
       width: 0 !important
     }
 
-    .rightpart {
-      float: right;
-      width: 78%;
+    .chanitem {
+      display: flex;
+      flex-direction: row;
+      line-height: 24px;
+    }
+
+    .channame {
+      /* 填充剩余宽度 */
+      flex: 1;
+      /* 内容溢出处理 */
+      overflow: hidden;
+      /* 文本溢出处理 */
+      text-overflow: ellipsis;
+      /* 旋转框垂直居中 */
+      align-self: center;
+      line-height: 20px;
+
+      vertical-align: middle;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      vertical-align: middle;
+    }
+
+    .chanval {
+      color: blueviolet;
+      text-align: bottom;
+    }
+
+    .btn-hover-display {
+      /* hide */
+      display: none;
     }
 
     .btn-float {
@@ -103,10 +165,6 @@
       padding: 6px 0;
       font-size: 20px;
       border-radius: 4vh;
-    }
-
-    #lastestv {
-      color: blueviolet;
     }
 
     #dataplot {
@@ -130,6 +188,8 @@
 
         channels: [],
 
+        defaultVisible: true,
+
       },
 
       created: function () {
@@ -143,9 +203,10 @@
                 that.$set(that.channels,
                   value, // channel name
                   {
-                    'visible': false, // [bool] whether display
+                    'visible': that.defaultVisible, // [bool] whether display
                     'values': [], // [num list] channel values
-                    'lastv': 0 // [num] lastest value
+                    'lastv': 0, // [num] lastest value
+                    'startpos': -1,// [num] start pos of recording 
                   });
               }
             );
@@ -164,7 +225,7 @@
         // dynamically resize chart
         window.onresize = function windowResize() {
           that.chart.resize();
-          that.chart.setOption(that.option, true);
+          that.chart.setOption(that.chart.getOption(), true);
         };
         // auto connect socket
         that.connect();
@@ -185,7 +246,7 @@
         initChart: function () {
           let that = this;
           // config chart
-          that.option = {
+          let option = {
             animation: false,
             xAxis: {
               show: false,
@@ -199,33 +260,53 @@
               type: "value",
               splitLine: {
                 show: true,
-              }
+              },
+              // 设置y轴上下限
+              min: function (value) {
+                let ratio = 5, ret = 0;
+                if (value.min < 0) ret = value.min * ratio;
+                else if (value.min == 0) ret = value.max * -ratio;
+                else if (value.min > 0) ret = value.max * (1 - ratio);
+                return Math.floor(ret);
+              },
+              max: function (value) {
+                let ratio = 5, ret = 0;
+                if (value.max > 0) ret = value.max * ratio;
+                else if (value.max == 0) ret = value.min * -ratio;
+                else if (value.max < 0) ret = value.min * (1 - ratio);
+                return Math.ceil(ret);
+              },
             },
             legend: {},
             tooltip: {
               trigger: "item", // 'item' or 'axis'
-
             },
             // enable wheel Zoom
-            // dataZoom: [{
-            //   type: "inside"
-            // }],
+            dataZoom: [{
+              // params: https://www.cnblogs.com/lvxisha/p/9728332.html
+              type: "inside", // 'slider' or 'inside'
+              yAxisIndex: 0, // enable scale the first yaxis
+              filterMode: 'none',
+              zoomOnMouseWheel: true,
+              moveOnMouseMove: true,
+            }],
             series: [],
           };
           that.chart = echarts.init(document.getElementById("dataplot"));
-          that.chart.setOption(that.option);
+          that.chart.setOption(option, true);
         },
         updateOption: function () {
           let that = this;
+          // get datazoom 、visible series ...
+          option = that.chart.getOption();
           // clear previous option
-          that.option.series = [];
+          option.series = [];
           // display visible channel
-          for (let key in that.channels) {
-            // key -> channel name
-            let channel = that.channels[key];
+          for (let chanName in that.channels) {
+            let channel = that.channels[chanName];
             if (channel["visible"] === true) {
-              that.option.series.push({
-                name: key,
+              option.series.push({
+                name: chanName,
                 type: "line",
                 data: channel["values"].slice(-that.maxdisplay),
                 showSymbol: false,
@@ -233,15 +314,17 @@
             }
           }
           // refresh chart
-          that.chart.setOption(that.option, true); // no merge = true
+          that.chart.setOption(option, true); // no merge = true
         },
         appendValues: function (newvalues) {
           let that = this;
           // append values
-          for (let key in newvalues) {
-            let channel = that.channels[key];
-            channel["values"].push(...newvalues[key]);
-            channel["lastv"] = channel["values"].slice(-1)[0]; // lastest value
+          for (let chanName in newvalues) {
+            let channel = that.channels[chanName];
+            if (channel["visible"] === true) {
+              channel["values"].push(...newvalues[chanName]);
+              channel["lastv"] = channel["values"].slice(-1)[0]; // lastest value
+            }
           }
           // refresh chart
           that.updateOption();
@@ -275,6 +358,42 @@
           // disconnect to socket
           that.socket.disconnect();
         },
+
+
+        // show or hide btn-record
+        onMouseEnterItem: function (event) {
+          let elem = event.target.querySelector(".btn-hover-display");
+          if (elem) elem.style.cssText += "display:inline-block"
+        },
+        onMouseLeaveItem: function (event) {
+          let elem = event.target.querySelector(".btn-hover-display");
+          if (elem) elem.style.cssText += "display:none"
+        },
+
+        // record channel wave
+        recordWave: function (chanName, event) {
+          let that = this;
+          let channel = that.channels[chanName];
+          let length = channel['values'].length;
+          if (channel['startpos'] === -1) {
+            // record the start pos
+            channel['startpos'] = length;
+          } else {
+            // whether have new values
+            if (channel['startpos'] < length) {
+              let data = channel["values"].slice(channel['startpos']).join('\n');
+              // use tag 'a' to savefile
+              let t = new Date();
+              let link = document.createElement("a"); // <a href=''></a>
+              link.href = 'data:text/csv;charset=utf-8,\ufeff' + encodeURIComponent(data);;
+              link.download = chanName + "_" + t.getYear() + t.getMonth() + t.getHours() + t.getMinutes() + t.getSeconds() + ".csv"; // filename
+              link.click(); // save to file
+            }
+            // clear startpos
+            channel['startpos'] = -1;
+          }
+        },
+
 
       },
 
